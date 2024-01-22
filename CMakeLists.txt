@@ -42,6 +42,8 @@ set(CMAKE_C_FLAGS "-Wextra -Wshadow -Wimplicit-function-declaration -Wredundant-
 set(CMAKE_CXX_FLAGS "-Wextra -Wshadow -Wredundant-decls  -Weffc++ -fno-common -ffunction-sections -fdata-sections")
 
 option(DEBUG "project debug" OFF)
+option(FREERTOS "freertos" OFF)
+option(SFUD "sfud" ON)
 
 if(DEBUG)
   set(CMAKE_BUILD_TYPE Debug)
@@ -55,6 +57,7 @@ project(tanuki LANGUAGES C CXX)
 list(APPEND TANUKI_SOURCE
   main.c
   board/board.c
+  components/sfud_port.c
   )
 
 list(TRANSFORM TANUKI_SOURCE PREPEND ${CMAKE_CURRENT_SOURCE_DIR}/src/)
@@ -175,7 +178,6 @@ add_custom_target(
 link_directories("${LIBOPENCM3_DIR}/lib/")
 include_directories(SYSTEM ${LIBOPENCM3_DIR}/include/)
 
-
 # Additional Flags
 set(ADDITIONAL_C_FLAGS "-fmessage-length=0 -fno-strict-aliasing -ffunction-sections -fdata-sections -fsigned-char")
 set(ADDITIONAL_CXX_FLAGS "-fno-exceptions -fno-rtti")
@@ -191,6 +193,120 @@ add_executable(${PROJECT_NAME}.elf ${TANUKI_SOURCE})
 target_link_libraries(${PROJECT_NAME}.elf "opencm3_${GENLINK_FAMILY}")
 set_target_properties(${PROJECT_NAME}.elf PROPERTIES OUTPUT_NAME "${PROJECT_NAME}_${CMAKE_BUILD_TYPE}.elf")
 set_target_properties(${PROJECT_NAME}.elf PROPERTIES LINK_FLAGS ${LINKER_FLAGS})
+
+# freertos
+if(FREERTOS)
+
+  find_file(FREERTOS_DIR "FreeRTOS-Kernel" "${CMAKE_CURRENT_SOURCE_DIR}" PATH_SUFFXIES "lib/")
+  if (FREERTOS_DIR STREQUAL "FREERTOS_DIR-NOTFOUND")
+    message(FATAL_ERROR "Could not locate FreeRTOS_KERNEL directory , Please update submodule")
+  endif ()
+
+  add_library(freertos_config INTERFACE)
+
+  target_include_directories(freertos_config
+    INTERFACE
+    "../template_configuration"
+  )
+
+  if (DEFINED FREERTOS_SMP_EXAMPLE AND FREERTOS_SMP_EXAMPLE STREQUAL "1")
+    message (STATUS "Build FreeRTOS SMP example")
+    add_compile_options( -DconfigNUMBER_OF_CORES=2 -DconfigUSE_PASSIVE_IDLE_HOOK=0)
+  endif()
+
+  # Select the heap port.  values between 1-4 will pick a heap.
+  set(FREERTOS_HEAP "4" CACHE STRING "" FORCE)
+
+  # Select the native compile PORT
+  set(FREERTOS_PORT "GCC_ARM_CM3" CACHE STRING "" FORCE)
+  add_subdirectory(${FREERTOS_DIR} FreeRTOS-Kernel)
+  target_link_libraries(${PROJECT_NAME} freertos_kernel freertos_config)
+
+endif()
+
+
+# sfud
+if(SFUD)
+
+  find_file(SFUD_DIR "SFUD" "${CMAKE_CURRENT_SOURCE_DIR}" PATH_SUFFXIES "lib/")
+  if (FREERTOS_DIR STREQUAL "SFUD_DIR-NOTFOUND")
+    message(FATAL_ERROR "Could not locate SFUD directory , Please update submodule")
+  endif ()
+
+  list(APPEND SFUD_SOURCE
+    sfud.c
+    sfud_sfdp.c
+  )
+
+  list(TRANSFORM SFUD_SOURCE PREPEND ${SFUD_DIR}/sfud/src/)
+
+  add_library(sfud_lib STATIC ${SFUD_SOURCE})
+  target_include_directories(sfud_lib SYSTEM PUBLIC ${SFUD_DIR}/sfud/inc/)
+  target_include_directories(${PROJECT_NAME}.elf SYSTEM PUBLIC ${SFUD_DIR}/sfud/inc/)
+  target_link_libraries(${PROJECT_NAME}.elf sfud_lib)
+
+endif()
+
+
+if (LVGL)
+  find_file(LVGL_DIR "lvgl" "${CMAKE_CURRENT_SOURCE_DIR}" PATH_SUFFXIES "lib/")
+  if (LVGL_DIR STREQUAL "LVGL_DIR-NOTFOUND")
+    message(FATAL_ERROR "Could not locate LVGL directory , Please update submodule")
+  endif ()
+
+  file(GLOB_RECURSE SOURCES ${LVGL_ROOT_DIR}/src/*.c ${LVGL_ROOT_DIR}/src/*.S)
+  add_library(lvgl ${SOURCES})
+  add_library(lvgl::lvgl ALIAS lvgl)
+
+  target_include_directories(lvgl SYSTEM PUBLIC ${LVGL_DIR} ${LV_CONF_DIR})
+endif()
+
+if (TINYUSB)
+  find_file(TINYUSB_DIR "tinyusb" "${CMAKE_CURRENT_SOURCE_DIR}" PATH_SUFFXIES "lib/")
+  if (TINYUSB_DIR STREQUAL "TINYUSB_DIR-NOTFOUND")
+    message(FATAL_ERROR "Could not locate TINYUSB directory , Please update submodule")
+  endif ()
+
+  add_subdirectory(TINYUSB_DIR)
+  target_link_libraries(${PROJECT_NAME} tinyusb)
+endif()
+
+
+if (FATFS)
+
+  find_file(FATFS_DIR "fatfs" "${CMAKE_CURRENT_SOURCE_DIR}" PATH_SUFFXIES "lib/")
+  if (FATFS_DIR STREQUAL "FATFS_DIR-NOTFOUND")
+    message(FATAL_ERROR "Could not locate FATFS directory , Please update submodule")
+  endif ()
+
+  list(APPEND FATFS_SOURCE
+    ff.c
+    ffsystem.c
+    ffunicode.c
+  )
+
+  list(TRANSFORM SFUD_SOURCE PREPEND ${FATFS_DIR}/source/)
+
+  add_library(fatfs_lib STATIC ${SFUD_SOURCE})
+  target_include_directories(fatfs_lib SYSTEM PUBLIC ${SFUD_DIR}/source/)
+  target_link_libraries(${PROJECT_NAME}.elf fatfs_lib)
+
+endif()
+
+
+if (LWIP)
+
+  find_file(LWIP_DIR "lwip" "${CMAKE_CURRENT_SOURCE_DIR}" PATH_SUFFXIES "lib/")
+  if (LWIP_DIR STREQUAL "LWIP_DIR-NOTFOUND")
+    message(FATAL_ERROR "Could not locate LWIP directory , Please update submodule")
+  endif ()
+
+  include(${LWIP_DIR})
+
+  target_include_directories(${PROJECT_NAME} SYSTEM PUBLIC ${LWIP_INCLUDE_DIRS} ${LWIP_MBEDTLS_INCLUDE_DIRS})
+  target_link_libraries(${PROJECT_NAME} lwipcore)
+
+endif()
 
 message(STATUS "Generated Linkder File : ${LINKER_SCRIPT}")
 message(STATUS "Cmake Current Source Dir : ${CMAKE_CURRENT_SOURCE_DIR}")
